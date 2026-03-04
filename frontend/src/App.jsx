@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './App.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
+const DEBOUNCE_MS = 300;
 
 // Weather-based background images from Unsplash (live from internet)
 const BG_IMAGES = {
@@ -41,19 +42,72 @@ function getWeatherType(id) {
 
 function App() {
   const [city, setCity] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [weather, setWeather] = useState(null);
   const [forecast, setForecast] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const inputRef = useRef(null);
+  const suggestionsRef = useRef(null);
 
   const weatherType = weather ? getWeatherType(weather.weather?.[0]?.id) : 'default';
   const bgImage = BG_IMAGES[weatherType];
   const gradientTheme = GRADIENT_THEMES[weatherType];
 
+  // Debounced city suggestions
+  useEffect(() => {
+    const query = city.trim();
+    if (query.length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setSuggestionsLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/cities?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        setSuggestions(Array.isArray(data) ? data : []);
+        setShowSuggestions(true);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setSuggestionsLoading(false);
+      }
+    }, DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [city]);
+
+  // Close suggestions on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (
+        suggestionsRef.current &&
+        !suggestionsRef.current.contains(e.target) &&
+        inputRef.current &&
+        !inputRef.current.contains(e.target)
+      ) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const selectSuggestion = (s) => {
+    setCity(s.label);
+    setShowSuggestions(false);
+    setSuggestions([]);
+  };
+
   const search = async () => {
     if (!city.trim()) return;
     setLoading(true);
     setError('');
+    setShowSuggestions(false);
+    setSuggestions([]);
     setWeather(null);
     setForecast(null);
     try {
@@ -99,14 +153,46 @@ function App() {
         <header className={`header ${weather ? 'header--compact' : ''} animate-up`}>
           <h1>Weather Forecast</h1>
           <p>Search for any city worldwide to get real-time weather and 5-day forecast</p>
-          <div className="search">
-            <input
-              type="text"
-              placeholder="Enter city (e.g. London, Tokyo, New York)"
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && search()}
-            />
+          <div className="search" ref={suggestionsRef}>
+            <div className="search-input-wrapper">
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Start typing a city name..."
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (showSuggestions && suggestions.length > 0) {
+                      selectSuggestion(suggestions[0]);
+                    } else {
+                      search();
+                    }
+                  }
+                  if (e.key === 'Escape') setShowSuggestions(false);
+                }}
+                onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+              />
+              {showSuggestions && (
+                <ul className="suggestions">
+                  {suggestionsLoading ? (
+                    <li className="suggestions-loading">Searching...</li>
+                  ) : suggestions.length === 0 ? (
+                    <li className="suggestions-empty">No cities found</li>
+                  ) : (
+                    suggestions.map((s, i) => (
+                      <li
+                        key={`${s.name}-${s.country}-${i}`}
+                        onClick={() => selectSuggestion(s)}
+                        role="option"
+                      >
+                        {s.label}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              )}
+            </div>
             <button onClick={search} disabled={loading}>
               {loading ? 'Searching...' : 'Search'}
             </button>

@@ -13,6 +13,26 @@ if (!API_KEY) {
   console.warn('⚠️  WEATHER_API_KEY not found in .env - API calls will fail');
 }
 
+// City suggestions (OpenWeatherMap Geocoding API)
+app.get('/api/cities', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (q.length < 2) return res.json([]);
+    const url = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(q)}&limit=5&appid=${API_KEY}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    const suggestions = (data || []).map((c) => ({
+      name: c.name,
+      country: c.country,
+      state: c.state,
+      label: c.state ? `${c.name}, ${c.state}, ${c.country}` : `${c.name}, ${c.country}`,
+    }));
+    res.json(suggestions);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Geocode: get lat/lon from city name
 async function getCoords(city) {
   const url = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(city)}&limit=1&appid=${API_KEY}`;
